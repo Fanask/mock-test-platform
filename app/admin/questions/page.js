@@ -7,7 +7,7 @@ import { supabase } from '../../../lib/supabase';
 export default function QuestionsPage() {
   const [tests, setTests] = useState([]);
   const [testId, setTestId] = useState('');
-  const [questionText, setQuestionText] = useState('');
+  const [question, setQuestion] = useState('');
   const [optionA, setOptionA] = useState('');
   const [optionB, setOptionB] = useState('');
   const [optionC, setOptionC] = useState('');
@@ -16,78 +16,93 @@ export default function QuestionsPage() {
   const [marks, setMarks] = useState('1');
   const [negativeMarks, setNegativeMarks] = useState('0');
   const [message, setMessage] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const router = useRouter();
 
   useEffect(() => {
+    async function loadTests() {
+      const { data: userData } = await supabase.auth.getUser();
+
+      if (!userData.user) {
+        router.push('/login');
+        return;
+      }
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', userData.user.id)
+        .single();
+
+      if (profile?.role !== 'admin') {
+        router.push('/dashboard');
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('tests')
+        .select('id, title')
+        .order('created_at', { ascending: false });
+
+      if (!error) {
+        setTests(data || []);
+      }
+    }
+
     loadTests();
-  }, []);
-
-  async function loadTests() {
-    const { data: userData } = await supabase.auth.getUser();
-
-    if (!userData.user) {
-      router.push('/login');
-      return;
-    }
-
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', userData.user.id)
-      .single();
-
-    if (profile?.role !== 'admin') {
-      router.push('/dashboard');
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from('tests')
-      .select('id, title')
-      .order('created_at', { ascending: false });
-
-    if (!error) {
-      setTests(data || []);
-    }
-  }
+  }, [router]);
 
   async function addQuestion(e) {
     e.preventDefault();
     setMessage('');
+    setSaving(true);
 
     if (!testId) {
       setMessage('Please select a test.');
+      setSaving(false);
       return;
     }
 
+    const { data: existing } = await supabase
+      .from('questions')
+      .select('question_number')
+      .eq('test_id', testId)
+      .order('question_number', { ascending: false })
+      .limit(1);
+
+    const nextNumber =
+      existing && existing.length > 0
+        ? Number(existing[0].question_number || 0) + 1
+        : 1;
+
     const { error } = await supabase.from('questions').insert({
       test_id: testId,
-      question_text: questionText,
+      question_number: nextNumber,
+      question,
       option_a: optionA,
       option_b: optionB,
       option_c: optionC,
       option_d: optionD,
       correct_answer: correctAnswer,
-      marks: Number(marks),
-      negative_marks: Number(negativeMarks),
+      marks: Number(marks) || 1,
+      negative_marks: Number(negativeMarks) || 0
     });
 
     if (error) {
       setMessage(error.message);
-      return;
+    } else {
+      setMessage(`Question ${nextNumber} added successfully!`);
+
+      setQuestion('');
+      setOptionA('');
+      setOptionB('');
+      setOptionC('');
+      setOptionD('');
+      setCorrectAnswer('A');
     }
 
-    setMessage('Question added successfully!');
-
-    setQuestionText('');
-    setOptionA('');
-    setOptionB('');
-    setOptionC('');
-    setOptionD('');
-    setCorrectAnswer('A');
-    setMarks('1');
-    setNegativeMarks('0');
+    setSaving(false);
   }
 
   return (
@@ -103,7 +118,7 @@ export default function QuestionsPage() {
             onChange={(e) => setTestId(e.target.value)}
             required
           >
-            <option value="">-- Select a test --</option>
+            <option value="">-- Select Test --</option>
 
             {tests.map((test) => (
               <option key={test.id} value={test.id}>
@@ -116,9 +131,9 @@ export default function QuestionsPage() {
 
           <textarea
             rows="5"
-            placeholder="Enter question..."
-            value={questionText}
-            onChange={(e) => setQuestionText(e.target.value)}
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            placeholder="Enter question"
             required
           />
 
@@ -180,8 +195,8 @@ export default function QuestionsPage() {
             onChange={(e) => setNegativeMarks(e.target.value)}
           />
 
-          <button className="btn" type="submit">
-            Add Question
+          <button className="btn" type="submit" disabled={saving}>
+            {saving ? 'Saving...' : 'Add Question'}
           </button>
         </form>
 
@@ -190,14 +205,6 @@ export default function QuestionsPage() {
             {message}
           </p>
         )}
-
-        <button
-          className="btn secondary"
-          style={{ marginTop: 15 }}
-          onClick={() => router.push('/admin')}
-        >
-          Back to Admin
-        </button>
       </div>
     </main>
   );
